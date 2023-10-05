@@ -86,6 +86,7 @@ if __name__ == "__main__":
                 c = torch.cat((c, cc), dim=1) #MJ: c= the stack of the masked_image and the mask
 
                 shape = (c.shape[1] - 1,) + c.shape[2:] #MJ: c=(B,3+1,H,W): shape=(3,H,W)= the shape of the image
+                #MJ: I modified omri's sampler.sample() call, by providing mask, org_mask, and init_image as additional parameters
                 samples_ddim, _ = sampler.sample(
                     S=opt.steps,
                     
