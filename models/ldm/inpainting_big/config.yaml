@@ -8,7 +8,7 @@ model:
     timesteps: 1000
     loss_type: l1
     first_stage_key: image
-    cond_stage_key: masked_image
+    cond_stage_key: masked_image  #MJ: conditioning_key: is not defined, it means that conditionining_key: concat
     image_size: 64
     channels: 3
     concat_mode: true

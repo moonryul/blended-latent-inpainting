@@ -1,35 +1,50 @@
-import argparse
-import numpy as np
-from PIL import Image
+import argparse, os, sys, glob
 
-from diffusers import DDIMScheduler, StableDiffusionPipeline
+from PIL import Image
+from tqdm import tqdm
+import numpy as np
+import torch
+
+#from diffusers import DDIMScheduler, StableDiffusionPipeline
+from diffusers import DDIMScheduler, StableDiffusionInpaintPipeline ## This inpaint pipleline is  not pure, having text prompt
+
+
 import torch
 
 
-class BlendedLatnetDiffusion:
+class BlendedLatentDiffusion:
+    
     def __init__(self):
         self.parse_args()
+        
         self.load_models()
 
     def parse_args(self):
         parser = argparse.ArgumentParser()
+        
         parser.add_argument(
-            "--prompt", type=str, required=True, help="The target text prompt"
+        "--prompt", type=str, #required=True,
+                    default="a beatiful cat",help="The target text prompt"
         )
         parser.add_argument(
-            "--init_image", type=str, required=True, help="The path to the input image"
+            "--init_image", type=str, #required=True,
+            default="inputs/img.png", help="The path to the input image"
         )
         parser.add_argument(
-            "--mask", type=str, required=True, help="The path to the input mask"
+            "--mask", type=str, #required=True,
+            default="inputs/mask.png", help="The path to the input mask"
         )
+    
+    
         parser.add_argument(
             "--model_path",
             type=str,
-            default="stabilityai/stable-diffusion-2-1-base",
+            #default="stabilityai/stable-diffusion-2-1-base",
+            default="stabilityai/stable-diffusion-2-inpainting",
             help="The path to the HuggingFace model",
         )
         parser.add_argument(
-            "--batch_size", type=int, default=4, help="The number of images to generate"
+            "--batch_size", type=int, default=1, help="The number of images to generate"
         )
         parser.add_argument(
             "--blending_start_percentage",
@@ -46,14 +61,20 @@ class BlendedLatnetDiffusion:
         )
 
         self.args = parser.parse_args()
+    #End def parse_args(self)    
 
     def load_models(self):
         
-        #MJ: create a basic txt2img pipeline
-        pipe = StableDiffusionPipeline.from_pretrained(
+        
+        #MJ: create a basic txt2img pipeline => Replace it with the pure inpainting pipeline
+        # pipe = StableDiffusionPipeline.from_pretrained(
+        #     self.args.model_path, torch_dtype=torch.float16
+        # )
+        
+        
+        pipe = StableDiffusionInpaintPipeline.from_pretrained(
             self.args.model_path, torch_dtype=torch.float16
         )
-        
         self.vae = pipe.vae.to(self.args.device)
         self.tokenizer = pipe.tokenizer
         self.text_encoder = pipe.text_encoder.to(self.args.device)
@@ -66,12 +87,14 @@ class BlendedLatnetDiffusion:
             set_alpha_to_one=False,
         )
 
+    #End def load_models(self)
+    
     @torch.no_grad()
-    def edit_image(
+    def blended_diffusion(
         self,
         image_path,
         mask_path,
-        prompts,
+        prompts_batched,
         height=512,
         width=512,
         num_inference_steps=50,
@@ -79,21 +102,24 @@ class BlendedLatnetDiffusion:
         generator=torch.manual_seed(42),
         blending_percentage=0.25,
     ):
-        batch_size = len(prompts)
-
+        batch_size = len(prompts_batched)
+      
         image = Image.open(image_path)
         image = image.resize((height, width), Image.BILINEAR)
         image = np.array(image)[:, :, :3]
         
         #MJ: z_{init} ~ E(x), x= source image: z_{init} = source_latents
+        
         source_latents = self._image2latent(image)
+        #MJ: =>  latents = self.vae.encode(image)["latent_dist"].mean
               
         #MJ:  m_{latent} = downsample(m): resize the mask to dest_size=(64, 64): m_{latent} = latent_mask
-        latent_mask, org_mask = self._read_mask(mask_path)
+        latent_mask, org_mask = self._read_mask(mask_path)  #MJ: resize mask to (64,64)
         
-
+        masked_image_latents = source_latents * (latent_mask  < 0.5) #MJ: get the background image
+               
         text_input = self.tokenizer(
-            prompts,
+            prompts_batched,
             padding="max_length",
             max_length=self.tokenizer.model_max_length,
             truncation=True,
@@ -105,88 +131,96 @@ class BlendedLatnetDiffusion:
         max_length = text_input.input_ids.shape[-1]
         
         uncond_input = self.tokenizer(
-            [""] * batch_size,
+            [""] * batch_size,    #MJ: consider the batch_size
             padding="max_length",
             max_length=max_length,
             return_tensors="pt",
         )
         uncond_embeddings = self.text_encoder(uncond_input.input_ids.to("cuda"))[0]
-        text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+        text_embeddings = torch.cat([uncond_embeddings, text_embeddings]) #MJ: text_embeddings: shape=(8,77,1024)
 
         #MJ: z_{k} ~ noise(z_init, k): z_{k} = latents 
+        # latents = torch.randn(
+        #     (batch_size, self.unet.in_channels, height // 8, width // 8),  #MJ: consider the batch_size
+        #     generator=generator,
+        # )
+        
         latents = torch.randn(
-            (batch_size, self.unet.in_channels, height // 8, width // 8),  #MJ: self.unet.in_channels=4; => use 'unet.config.in_channels' 
+            (batch_size, 4, height // 8, width // 8),  #MJ: consider the batch_size
             generator=generator,
         )
+        
+        
         
         latents = latents.to("cuda").half()
 
         self.scheduler.set_timesteps(num_inference_steps)
 
-        #MJ: blending_percentage = 0.25
+        #MJ: blending_percentage = 0.25 = denoising_strength
+        #MJ: The denoising loop: self.scheduler.timesteps contains real timesteps in the range of 1000
+         
+        latent_mask = torch.cat([latent_mask]*2)            
+        masked_image_latents = torch.cat([ masked_image_latents]*2) 
+          
         for t in self.scheduler.timesteps[
             int(len(self.scheduler.timesteps) * blending_percentage) :
         ]:
             # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
-            latent_model_input = torch.cat([latents] * 2)
-            
-
+            latent_model_input = torch.cat([latents] * 2) #MJ: latents: shape=(4,9,64,64); latent_model_input: shape = torch.Size([8, 9, 64, 64])
+              
+            #MJ: https://github.com/huggingface/diffusers/pull/637
+            #The functions: scale_initial_noise and scale_model_input are not required by DDIM or PNDM but just K-LMS. 
+            # 
             latent_model_input = self.scheduler.scale_model_input(
-                latent_model_input, timestep=t
+               latent_model_input, timestep=t
             )
 
+            
+            #MJ: Add this line to the original blended-latent-diffusion, which uses
+            # StableDiffusionPipeline (txt2imge), which has num_channels_unet=self.unet.config.in_channels =9
+
+            #latent_model_input = torch.cat([latent_model_input, latent_mask, masked_image_latents], dim=1) 
+            #latent_model_input = torch.cat([latent_model_input,  masked_image_latents, latent_mask], dim=1) 
+             #MJ: latent_mask ([1,1,64,64]) and masked_image_latents (1,4,64,64]) are broadcasted to latent_model_input ([8,9,64,64])??
+          
             #MJ: z_fg ~ denoise(z_t, d, t), d= text_embeddings
             # predict the noise residual
-            #MJ: use "stabilityai/stable-diffusion-2-1-base":
-            
-#             This stable-diffusion-2-1-base model fine-tunes stable-diffusion-2-base (512-base-ema.ckpt) with 220k extra steps taken, with punsafe=0.98 on the same dataset.
-
-# Use it with the stablediffusion repository: download the v2-1_512-ema-pruned.ckpt here.
-# Use it with 🧨 diffusers
-
-#===> Now use: https://huggingface.co/stabilityai/stable-diffusion-2-inpainting
-# This stable-diffusion-2-inpainting model is resumed from stable-diffusion-2-base (512-base-ema.ckpt) and trained for another 200k steps. Follows the mask-generation strategy presented in LAMA which, in combination with the latent VAE representations of the masked image, are used as an additional conditioning.
-
-# Use it with the stablediffusion repository: download the 512-inpainting-ema.ckpt here.
-# Use it with 🧨 diffusers:
-
-# pip install diffusers transformers accelerate scipy safetensors
-
-# from diffusers import StableDiffusionInpaintPipeline
-# pipe = StableDiffusionInpaintPipeline.from_pretrained(
-#     "stabilityai/stable-diffusion-2-inpainting",
-#     torch_dtype=torch.float16,
-# )
-# pipe.to("cuda")
-# prompt = "Face of a yellow cat, high resolution, sitting on a park bench"
-# #image and mask_image should be PIL images.
-# #The mask structure is white for inpainting and black for keeping as is
-# image = pipe(prompt=prompt, image=image, mask_image=mask_image).images[0]
-# image.save("./yellow_cat_on_park_bench.png")
-
             with torch.no_grad():
-                noise_pred = self.unet(
-                    latent_model_input, t, encoder_hidden_states=text_embeddings
-                ).sample
-
-            # perform guidance
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                 noise_pred = self.unet(
+                     latent_model_input, t,  encoder_hidden_states=text_embeddings #MJ: text_embeddings: shape = (8,77,1024)
+                 ).sample
+            #MJ: noise_pred is the model_output
+            
+                 
+            #MJ: In the  ddpm code: 
+            #    noise_pred = self.ddpm.apply_model(
+            #         latent_model_input, t, cond, # context
+            #     )
+                     
+             # perform guidance
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2) #MJ: noise_pred: (8,4,64,64); noise_pred_uncond: (4,4,64,64)
             
             noise_pred = noise_pred_uncond + guidance_scale * (
                 noise_pred_text - noise_pred_uncond
-            )
+            )          
 
-            #MJ: z_fg ~ denoise(z_t,d,t): z_fg = latents
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(noise_pred, t, latents).prev_sample
-
+            #MJ:  z_fg = latents
+            # compute the previous noisy sample x_t -> x_t-1:  def step(self, model_output: torch.FloatTensor,timestep: int,sample: torch.FloatTensor,
+            latents = self.scheduler.step(noise_pred, t, latents).prev_sample #MJ: prev_sample is the field variable of SchedulerOutput dataclass
+            
+            #MJ:  latent_model_input.shape: torch.Size([4, 4, 64, 64])
+            #            noise_pred.shape:  torch.Size([4, 4, 64, 64])
+            #                 latents.shape: torch.Size([4, 9, 64, 64])
             # Blending
             #MJ: z_bg ~ noise(z_init, t), z_init= source_latents: z_bg = noise_source_latents
             noise_source_latents = self.scheduler.add_noise(
                 
                 source_latents, torch.randn_like(latents), t
             )
-            #MJ: z_t = z_fg * m_{latent} + z_bg * (1- m_{latent}) 
+            #MJ: scheduler.add_noise(): #MJ: x_t = sqrt( alpha_t^hat) x0 + sqrt( 1-alpha_t^hat) eps
+            
+            #MJ: masking for blended latent diffusion:
+            # z_t = z_fg * m_{latent} + z_bg * (1- m_{latent}) 
             latents = latents * latent_mask + noise_source_latents * (1 - latent_mask)
         #for t in self.scheduler.timesteps[
              
@@ -195,13 +229,15 @@ class BlendedLatnetDiffusion:
 
         with torch.no_grad():
             image = self.vae.decode(latents).sample
+            
 
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
         images = (image * 255).round().astype("uint8")
 
         return images
-
+    #def blended_inpaint
+    
     @torch.no_grad()
     def _image2latent(self, image):
         image = torch.from_numpy(image).float() / 127.5 - 1
@@ -209,7 +245,7 @@ class BlendedLatnetDiffusion:
         image = image.half()
         
         latents = self.vae.encode(image)["latent_dist"].mean
-        
+        #MJ: latents = self.ddpm.first_stage_mode.encode(image)
         latents = latents * 0.18215 
         #MJ: = latents * scale_factor = latents/std(z) = the normalized values with unit variance
 
@@ -219,21 +255,26 @@ class BlendedLatnetDiffusion:
         org_mask = Image.open(mask_path).convert("L")
         mask = org_mask.resize(dest_size, Image.NEAREST)
         mask = np.array(mask) / 255
+        #MJ: preserve the mask, not invert it
         mask[mask < 0.5] = 0
         mask[mask >= 0.5] = 1
         mask = mask[np.newaxis, np.newaxis, ...]
         mask = torch.from_numpy(mask).half().to(self.args.device)
 
         return mask, org_mask
+#End class BlendedLatnetDiffusion
 
 #MJ: python scripts/text_editing_stable_diffusion.py --prompt "a stone" --init_image "inputs/img.png" --mask "inputs/mask.png"
 
 if __name__ == "__main__":
-    bld = BlendedLatnetDiffusion()
-    results = bld.edit_image(
+    
+    bld = BlendedLatentDiffusion()
+    
+   #MJ results = bld.edit_image(
+    results = bld.blended_diffusion(
         bld.args.init_image,
         bld.args.mask,
-        prompts=[bld.args.prompt] * bld.args.batch_size,
+        prompts_batched=[bld.args.prompt] * bld.args.batch_size, #  MJ: consider the batch_size
         blending_percentage=bld.args.blending_start_percentage,
     )
     results_flat = np.concatenate(results, axis=1)

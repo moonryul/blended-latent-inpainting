@@ -140,7 +140,8 @@ class DDPM(pl.LightningModule):
         self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
         if self.learn_logvar:
             self.logvar = nn.Parameter(self.logvar, requires_grad=True)
-
+    #End def __init__(
+        
     def register_schedule(
         self,
         given_betas=None,
@@ -234,7 +235,8 @@ class DDPM(pl.LightningModule):
         lvlb_weights[0] = lvlb_weights[1]
         self.register_buffer("lvlb_weights", lvlb_weights, persistent=False)
         assert not torch.isnan(self.lvlb_weights).all()
-
+    #End def register_schedule(
+        
     @contextmanager
     def ema_scope(self, context=None):
         if self.use_ema:
@@ -1129,12 +1131,13 @@ class LatentDiffusion(DDPM):
             pass
         else:
             if not isinstance(cond, list):
-                cond = [cond]
+                cond = [cond]  #MJ: cond is a list
+            #MJ: cond is a list    
             key = (
                 "c_concat" if self.model.conditioning_key == "concat" else "c_crossattn"
             )
             cond = {key: cond}
-
+        #MJ: execute the model on cond:
         if hasattr(self, "split_input_params"):
             assert len(cond) == 1  # todo can only deal with one conditioning atm
             assert not return_ids
@@ -1257,8 +1260,9 @@ class LatentDiffusion(DDPM):
             o = o.view((o.shape[0], -1, o.shape[-1]))  # (bn, nc * ks[0] * ks[1], L)
             # stitch crops together
             x_recon = fold(o) / normalization
-
-        else:
+        #End if hasattr(self, "split_input_params")
+        
+        else: #MJ: not  hasattr(self, "split_input_params")
             x_recon = self.model(x_noisy, t, **cond)
 
         if isinstance(x_recon, tuple) and not return_ids:
@@ -1848,12 +1852,15 @@ class DiffusionWrapper(pl.LightningModule):
         self.conditioning_key = conditioning_key
         assert self.conditioning_key in [None, "concat", "crossattn", "hybrid", "adm"]
 
+    #MJ: ddpm.model = DiffusionWrapper()
     def forward(self, x, t, c_concat: list = None, c_crossattn: list = None):
         if self.conditioning_key is None:
             out = self.diffusion_model(x, t)
+            
         elif self.conditioning_key == "concat":
             xc = torch.cat([x] + c_concat, dim=1)
-            out = self.diffusion_model(xc, t)
+            out = self.diffusion_model(xc, t) #MJ: => self.diffusion_model(xc, t, context=None) => UnetModel.forward: def forward(self, x, timesteps=None, context=None, y=None, **kwargs):
+            
         elif self.conditioning_key == "crossattn":
             cc = torch.cat(c_crossattn, 1)
             out = self.diffusion_model(x, t, context=cc)
