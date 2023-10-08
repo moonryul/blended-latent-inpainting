@@ -101,7 +101,7 @@ if __name__ == "__main__":
                 #c_cat = torch.cat((c1, c2), dim=1) #MJ: c= the stack of the masked_image and the mask
                 c_cat = torch.cat((c2, c1), dim=1) #MJ: c= the stack of the masked_image and the mask
                 shape = (c_cat.shape[1] - 1,) + c_cat.shape[2:] #MJ: c=(B,3+1,H,W): shape=(3,H,W)= the shape of the image
-                #MJ: I modified omri's sampler.sample() call, by providing mask, org_mask, and init_image as additional parameters
+                #MJ: I modified omri's sampler.sample() call, by providing mask and init_image as additional parameters
                 samples_ddim, intermediates = sampler.sample(
                     S=opt.steps,
                     
@@ -109,14 +109,11 @@ if __name__ == "__main__":
                     
                     batch_size=c_cat.shape[0],
                     shape=shape,
-                    #mask = None,
-                    mask=latent_mask,   #MJ: latent_mask in [0,1]
-                    org_mask=org_mask,   #MJ: in [0,1]
-                    #init_image=None,
-                    init_image = init_image,  #MJ: in [-1,1]
-                    x_T=None,
-                    percentage_of_pixel_blending = 0.0,
-                
+                    mask = None,
+                    #mask=latent_mask,   #MJ: latent_mask in [0,1]
+                                    
+                    init_image = init_image,  #MJ: in [-1,1]                  
+                                   
                     verbose=False,
                     
                     
