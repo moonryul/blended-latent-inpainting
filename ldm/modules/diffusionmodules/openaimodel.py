@@ -79,6 +79,44 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     A sequential module that passes timestep embeddings to the children that
     support it as an extra input.
     """
+    
+    #MJ: TimestepEmbedSequential moduleList consists of  conv_nd, ResBlock, AttentionBlock/SpatialTransformer:
+    # E.g.: self.middle_block = TimestepEmbedSequential(
+    #         ResBlock(
+    #             ch,
+    #             time_embed_dim,
+    #             dropout,
+    #             dims=dims,
+    #             use_checkpoint=use_checkpoint,
+    #             use_scale_shift_norm=use_scale_shift_norm,
+    #         ),
+    #         AttentionBlock(
+    #             ch,
+    #             use_checkpoint=use_checkpoint,
+    #             num_heads=num_heads,
+    #             num_head_channels=dim_head,
+    #             use_new_attention_order=use_new_attention_order,
+    #         )
+    #         if not use_spatial_transformer
+    #         else SpatialTransformer(
+    #             ch,
+    #             num_heads,
+    #             dim_head,
+    #             depth=transformer_depth,
+    #             context_dim=context_dim,
+    #         ),
+    #         ResBlock(
+    #             ch,
+    #             time_embed_dim,
+    #             dropout,
+    #             dims=dims,
+    #             use_checkpoint=use_checkpoint,
+    #             use_scale_shift_norm=use_scale_shift_norm,
+    #         ),
+    #     )
+      
+        
+        
 
     def forward(self, x, emb, context=None):
         for layer in self:
@@ -86,7 +124,9 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
                 x = layer(x, emb)
             elif isinstance(layer, SpatialTransformer):
                 x = layer(x, context)
-            else:
+            else: #MJ:  TimestepEmbedSequential(
+                #     conv_nd(dims, in_channels, model_channels, 3, padding=1)
+                # )
                 x = layer(x)
         return x
 
@@ -174,7 +214,7 @@ class Downsample(nn.Module):
         return self.op(x)
 
 
-class ResBlock(TimestepBlock):
+class ResBlock(TimestepBlock): #MJ: Resnet Block is a TimestepBlock which takes time-embedding as input
     """
     A residual block that can optionally change the number of channels.
     :param channels: the number of input channels.

@@ -17,6 +17,7 @@ from functools import partial
 from tqdm import tqdm
 from torchvision.utils import make_grid
 from pytorch_lightning.utilities.distributed import rank_zero_only
+#from pytorch_lightning.utilities.rank_zero  import rank_zero_only
 
 from ldm.util import (
     log_txt_as_img,
@@ -548,7 +549,9 @@ class LatentDiffusion(DDPM):
         concat_mode=True,
         cond_stage_forward=None,
         conditioning_key=None,
+        
         scale_factor=1.0,
+        
         scale_by_std=False,
         *args,
         **kwargs,
@@ -571,10 +574,29 @@ class LatentDiffusion(DDPM):
             self.num_downs = len(first_stage_config.params.ddconfig.ch_mult) - 1
         except:
             self.num_downs = 0
+            
+        
+        #MJ: The difference between directly assigning self.scale_factor and 
+        # registering it as a buffer in this context mainly comes down to how you want to manage and serialize this value:
+
+        # Direct Assignment:
+
+        # Simpler and more straightforward if you only need to store a constant value.
+        # Does not signal any special treatment or inclusion in model checkpoints.
+        # You can access and modify self.scale_factor like any other class variable.
+        # Registering as a Buffer:
+
+        # Signals that this value is part of the model's state, even if it's not trainable.
+        # Includes scale_factor in model checkpoints when you save the model.
+        # Provides consistency in how model-related data is managed, as it's treated similarly to other model parameters.    
+
+            
         if not scale_by_std:
             self.scale_factor = scale_factor
-        else:
+      
+        else: #MJ:  scale_by_std: false by default
             self.register_buffer("scale_factor", torch.tensor(scale_factor))
+        
         self.instantiate_first_stage(first_stage_config)
         self.instantiate_cond_stage(cond_stage_config)
         self.cond_stage_forward = cond_stage_forward
@@ -620,7 +642,9 @@ class LatentDiffusion(DDPM):
             encoder_posterior = self.encode_first_stage(x)
             z = self.get_first_stage_encoding(encoder_posterior).detach()
             del self.scale_factor
+            
             self.register_buffer("scale_factor", 1.0 / z.flatten().std())
+            
             print(f"setting self.scale_factor to {self.scale_factor}")
             print("### USING STD-RESCALING ###")
 
@@ -695,18 +719,18 @@ class LatentDiffusion(DDPM):
             raise NotImplementedError(
                 f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented"
             )
-        return self.scale_factor * z
+        return self.scale_factor * z  #MJ: z / std(z)
 
     def get_learned_conditioning(self, c):
-        if self.cond_stage_forward is None:
+        if self.cond_stage_forward is None: #MJ: cond_stage_forward=None by default
             if hasattr(self.cond_stage_model, "encode") and callable(
                 self.cond_stage_model.encode
             ):
                 c = self.cond_stage_model.encode(c)
                 if isinstance(c, DiagonalGaussianDistribution):
-                    c = c.mode()
+                    c = c.mode() #MJ: c <=  the mode of the c distribution
             else:
-                c = self.cond_stage_model(c)
+                c = self.cond_stage_model(c) #MJ: c <= self.cond_stage_model.forward(c)
         else:
             assert hasattr(self.cond_stage_model, self.cond_stage_forward)
             c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
@@ -908,9 +932,9 @@ class LatentDiffusion(DDPM):
             z = self.first_stage_model.quantize.get_codebook_entry(z, shape=None)
             z = rearrange(z, "b h w c -> b c h w").contiguous()
 
-        z = 1.0 / self.scale_factor * z
+        z = 1.0 / self.scale_factor * z  #MJ: z = sigma * z; self.scale_factor = 1/ sigma
 
-        if hasattr(self, "split_input_params"):
+        if hasattr(self, "split_input_params"): #MJ: an image, is divided or split into smaller regions or patches before processing. 
             if self.split_input_params["patch_distributed_vq"]:
                 ks = self.split_input_params["ks"]  # eg. (128, 128)
                 stride = self.split_input_params["stride"]  # eg. (64, 64)
@@ -966,7 +990,7 @@ class LatentDiffusion(DDPM):
                 else:
                     return self.first_stage_model.decode(z)
 
-        else:
+        else: #End: MJ: hasattr(self, "split_input_params")
             if isinstance(self.first_stage_model, VQModelInterface):
                 return self.first_stage_model.decode(
                     z, force_not_quantize=predict_cids or force_not_quantize
@@ -1042,7 +1066,7 @@ class LatentDiffusion(DDPM):
                 else:
                     return self.first_stage_model.decode(z)
 
-        else:
+        else: #MJ: End of else: if  hasattr(self, "split_input_params") 
             if isinstance(self.first_stage_model, VQModelInterface):
                 return self.first_stage_model.decode(
                     z, force_not_quantize=predict_cids or force_not_quantize

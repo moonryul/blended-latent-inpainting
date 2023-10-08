@@ -14,8 +14,12 @@ from PIL import Image
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
-from pytorch_lightning.utilities.distributed import rank_zero_only
+#MJ from pytorch_lightning.utilities.distributed import rank_zero_only
+from pytorch_lightning.utilities.rank_zero  import rank_zero_only
+#MJ: https://github.com/AUTOMATIC1111/stable-diffusion-webui/discussions/4111
+
 from pytorch_lightning.utilities import rank_zero_info
+
 
 from ldm.data.base import Txt2ImgIterableBaseDataset
 from ldm.util import instantiate_from_config

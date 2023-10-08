@@ -104,12 +104,12 @@ class DDIMSampler(object):
         unconditional_guidance_scale=1.0,
         unconditional_conditioning=None, #MJ: Aha! When we use the stable diffusion for inpainting, we have an option to set unconditional_conditioning to None
         skip_steps=0,
-        init_image=None,
+        init_image=None,  #MJ: the original input image
         percentage_of_pixel_blending=0, #MJ: provide percentage_of_pixel_blending = 0.1
         # this has to come in the same format as the conditioning, # e.g. as encoded tokens, ...
         **kwargs,
     ):
-        if conditioning is not None:
+        if conditioning is not None: #MJ: check the condition
             if isinstance(conditioning, dict):
                 cbs = conditioning[list(conditioning.keys())[0]].shape[0]
                 if cbs != batch_size:
@@ -191,18 +191,19 @@ class DDIMSampler(object):
             timesteps = timesteps[:-skip_steps]
 
         time_range = (
-            reversed(range(0, timesteps)) if ddim_use_original_steps else np.flip(timesteps)
-        )
+            reversed(range(0, timesteps)) if ddim_use_original_steps else np.flip(timesteps) #MJ: timesteps: (50,)
+        ) #MJ: time_range: [981,961,941,....,21,1]: step=20
         total_steps = timesteps if ddim_use_original_steps else timesteps.shape[0]
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
+        #MJ: compute x0 and x_T from init_image
         if init_image is not None:
             assert (
                 x0 is None and x_T is None
             ), "Try to infer x0 and x_t from init_image, but they already provided"
 
             encoder_posterior = self.model.encode_first_stage(init_image)
-            x0 = self.model.get_first_stage_encoding(encoder_posterior)
+            x0 = self.model.get_first_stage_encoding(encoder_posterior) #MJ: x0 = the normalized latent image with unit variance
             last_ts = torch.full((1,), time_range[0], device=device, dtype=torch.long)
             x_T = torch.cat([self.model.q_sample(x0, last_ts) for _ in range(b)])
             img = x_T
@@ -222,16 +223,6 @@ class DDIMSampler(object):
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
 
-            # Latent-level blending: mask is the latent_mask
-            if mask is not None and i < cutoff_point: #MJ: perform latent-level blending all the time in this experiment
-                n_masks = mask.shape[0]
-                masks_interval = len(time_range) // n_masks + 1
-                curr_mask = mask[i // masks_interval].unsqueeze(0)
-                # print(f"Using index {i // masks_interval}")
-                
-                #MJ: get the blurred version of the original image x0 corresponding to time ts:
-                img_orig = self.model.q_sample(x0, ts)
-                img = img_orig * (1 - curr_mask) + curr_mask * img
                 
             #MJ:1)  noise_pred = self.unet(
                 #     latent_model_input, t, encoder_hidden_states=text_embeddings
@@ -256,16 +247,28 @@ class DDIMSampler(object):
             )
             img, pred_x0 = outs
 
-            # Pixel-level blending: after cutoff_point: org_mask is the mask in the original image
-            if org_mask is not None and i >= cutoff_point:
-                foreground_pixels = self.model.decode_first_stage(pred_x0)
-                background_pixels = init_image
-                pixel_blended = foreground_pixels * org_mask + background_pixels * (1 - org_mask)
+            #MJ: i = 0,1,.....,49
+            # Latent-level blending: mask is the latent_mask
+            if mask is not None and i < cutoff_point: #MJ: perform latent-level blending all the time in this experiment
+                #n_masks = mask.shape[0]  #MJ: mask: shape=(1,1,128,128); 
+                # masks_interval = len(time_range) // n_masks + 1
+                # curr_mask = mask[i // masks_interval].unsqueeze(0) #MJ:mask[i // masks_interval]: shape=()1,128,128); curr_mask: shape =(1,1,128,128)
+                # # print(f"Using index {i // masks_interval}")
                 
-                img_x0 = self.model.get_first_stage_encoding(
-                    self.model.encode_first_stage(pixel_blended)
-                )
-                img = self.model.q_sample(img_x0, ts)
+                #MJ: get the blurred version of the original image x0 corresponding to time ts:
+                img_orig = self.model.q_sample(x0, ts)
+                #img = img_orig * (1 - curr_mask) + curr_mask * img
+                img = img_orig * (1 - mask) + mask * img
+            # Pixel-level blending: after cutoff_point: org_mask is the mask in the original image
+            # if org_mask is not None and i >= cutoff_point:
+            #     foreground_pixels = self.model.decode_first_stage(pred_x0)
+            #     background_pixels = init_image
+            #     pixel_blended = foreground_pixels * org_mask + background_pixels * (1 - org_mask)
+                
+            #     img_x0 = self.model.get_first_stage_encoding(
+            #         self.model.encode_first_stage(pixel_blended)
+            #     )
+            #     img = self.model.q_sample(img_x0, ts)
 
             #MJ: img may come from img,pred_x0 = outs or img =  self.model.q_sample(img_x0, ts)
             if callback:

@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 from PIL import Image
 
-from diffusers import DDIMScheduler, StableDiffusionPipeline
+from diffusers import DDIMScheduler, Stablcd eDiffusionPipeline
 import torch
 
 

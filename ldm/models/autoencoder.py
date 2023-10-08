@@ -45,6 +45,7 @@ class VQModel(pl.LightningModule):
             sane_index_shape=sane_index_shape,
         )
         self.quant_conv = torch.nn.Conv2d(ddconfig["z_channels"], embed_dim, 1)
+        
         self.post_quant_conv = torch.nn.Conv2d(embed_dim, ddconfig["z_channels"], 1)
         if colorize_nlabels is not None:
             assert type(colorize_nlabels) == int
@@ -164,6 +165,7 @@ class VQModel(pl.LightningModule):
                 xrec,
                 optimizer_idx,
                 self.global_step,
+                
                 last_layer=self.get_last_layer(),
                 split="train",
                 predicted_indices=ind,
@@ -323,7 +325,8 @@ class VQModelInterface(VQModel):
         self.embed_dim = embed_dim
 
     def encode(self, x):
-        h = self.encoder(x)
+        h = self.encoder(x) #MJ: self.encoder = Encoder(**ddconfig); => self.encoder.forward(x)
+        #MJ: 
         h = self.quant_conv(h)
         return h
 

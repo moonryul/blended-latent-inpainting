@@ -201,7 +201,7 @@ def make_attn(in_channels, attn_type="vanilla"):
         return LinAttnBlock(in_channels)
 
 
-class Model(nn.Module):
+class Model(nn.Module): 
     def __init__(
         self,
         *,
@@ -376,7 +376,7 @@ class Model(nn.Module):
         return self.conv_out.weight
 
 
-class Encoder(nn.Module):
+class Encoder(nn.Module): #MJ: Encoder becomes the encoder of VAE
     def __init__(
         self,
         *,
