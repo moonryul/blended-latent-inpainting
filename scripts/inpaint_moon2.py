@@ -12,6 +12,47 @@ from main import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 
 
+import torch
+import torchvision.transforms as transforms
+from PIL import Image
+
+def image_average(image_path):
+    """
+    Compute the deviations of each pixel from the average color of the image using GPU.
+
+    :param image_path: Path to the image file.
+    :return: Tensor containing deviations for each pixel.
+    """
+    
+    # Check if GPU (CUDA) is available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device == "cpu":
+        raise RuntimeError("CUDA is not available on this machine.")
+    
+    # Open the image
+    img = Image.open(image_path)
+    
+    # Convert the image to RGB
+    img = img.convert("RGB")
+    
+    # Use torchvision's transform to convert the PIL image to a PyTorch tensor
+    to_tensor = transforms.ToTensor()
+    img_tensor = to_tensor(img).unsqueeze(0)  # Add batch dimension
+    
+    # Move tensor to GPU
+    img_tensor = img_tensor.to(device)
+    
+    # Calculate the mean of each channel: R, G and B
+    mean_values = img_tensor.mean([2, 3]).squeeze()
+    
+    # Compute the deviations
+    deviations = img_tensor - mean_values
+    
+    # Remove batch dimension and return the deviations
+    return deviations.squeeze()
+
+
+
 def make_batch(image, mask, device):
     image = np.array(Image.open(image).convert("RGB"))
     image = image.astype(np.float32) / 255.0
@@ -121,12 +162,20 @@ if __name__ == "__main__":
                                  
                 x_samples_ddim = model.decode_first_stage(samples_ddim)
 
+                #MJ: batch is on the gpu
                 image = torch.clamp((batch["image"] + 1.0) / 2.0, min=0.0, max=1.0)
                 mask = torch.clamp((batch["mask"] + 1.0) / 2.0, min=0.0, max=1.0)
                 predicted_image = torch.clamp(
                     (x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0
                 ) #MJ: predicted_image is the generated image for the mask region
 
+                #MJ: compute the average of the original image, image.
+                mean_of_org_img  = image.mean([2,3], keepdim=True)
+                mean_of_predicted_image = predicted_image.mean([2,3], keepdim=True)
+                deviations_of_predicted_image = predicted_image - mean_of_predicted_image
+                # Use mean_of_org_img to shift the mean color of the predicted image to the original image
+                predicted_image = mean_of_org_img + deviations_of_predicted_image
+                 
                 inpainted = (1 - mask) * image + mask * predicted_image
                 inpainted = inpainted.cpu().numpy().transpose(0, 2, 3, 1)[0] * 255
                 Image.fromarray(inpainted.astype(np.uint8)).save(outpath)
