@@ -127,7 +127,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
             else: #MJ:  TimestepEmbedSequential(
                 #     conv_nd(dims, in_channels, model_channels, 3, padding=1)
                 # )
-                x = layer(x)
+                x = layer(x)  #MJ: AttentionBlock
         return x
 
 
@@ -370,7 +370,7 @@ class AttentionBlock(nn.Module):
         )  # TODO: check checkpoint usage, is True # TODO: fix the .half call!!!
         # return pt_checkpoint(self._forward, x)  # pytorch
 
-    def _forward(self, x):
+    def _forward(self, x): #MJ: [1,1024,256]: 1024 = 32 *32
         b, c, *spatial = x.shape
         x = x.reshape(b, c, -1)
         qkv = self.qkv(self.norm(x))
@@ -399,7 +399,7 @@ def count_flops_attn(model, _x, y):
     model.total_ops += th.DoubleTensor([matmul_ops])
 
 
-class QKVAttentionLegacy(nn.Module):
+class QKVAttentionLegacy(nn.Module): #MJ: this is used in inpaint_moon2.py
     """
     A module which performs QKV attention. Matches legacy QKVAttention + input/ouput heads shaping
     """

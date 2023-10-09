@@ -677,6 +677,7 @@ class LatentDiffusion(DDPM):
             if config == "__is_first_stage__":
                 print("Using first stage also as cond stage.")
                 self.cond_stage_model = self.first_stage_model
+                
             elif config == "__is_unconditional__":
                 print(f"Training {self.__class__.__name__} as an unconditional model.")
                 self.cond_stage_model = None
@@ -687,7 +688,7 @@ class LatentDiffusion(DDPM):
                 self.cond_stage_model.train = disabled_train
                 for param in self.cond_stage_model.parameters():
                     param.requires_grad = False
-        else:
+        else: #self.cond_stage_trainable
             assert config != "__is_first_stage__"
             assert config != "__is_unconditional__"
             model = instantiate_from_config(config)
@@ -710,8 +711,8 @@ class LatentDiffusion(DDPM):
         denoise_grid = make_grid(denoise_grid, nrow=n_imgs_per_row)
         return denoise_grid
 
-    def get_first_stage_encoding(self, encoder_posterior):
-        if isinstance(encoder_posterior, DiagonalGaussianDistribution):
+    def get_first_stage_encoding(self, encoder_posterior): #MJ: get_first_stage_encoding involves sampling from distribution
+        if isinstance(encoder_posterior, DiagonalGaussianDistribution): #MJ: encoder_posterior is not Gaussian dist in inpaint_moon2.py
             z = encoder_posterior.sample()
         elif isinstance(encoder_posterior, torch.Tensor):
             z = encoder_posterior

@@ -326,7 +326,7 @@ class VQModelInterface(VQModel):
 
     def encode(self, x):
         h = self.encoder(x) #MJ: self.encoder = Encoder(**ddconfig); => self.encoder.forward(x)
-        #MJ: 
+        #MJ: x: [1,3,512,512]; => (1/4) h: [1,3,128,128]
         h = self.quant_conv(h)
         return h
 

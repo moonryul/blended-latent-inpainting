@@ -203,6 +203,7 @@ class DDIMSampler(object):
             ), "Try to infer x0 and x_t from init_image, but they already provided"
 
             encoder_posterior = self.model.encode_first_stage(init_image)
+             #MJ: => self.first_stage_model.encode(x); encoder_posterior: [1,3,128,128]=mean ?
             x0 = self.model.get_first_stage_encoding(encoder_posterior) #MJ: x0 = the normalized latent image with unit variance
             last_ts = torch.full((1,), time_range[0], device=device, dtype=torch.long)
             x_T = torch.cat([self.model.q_sample(x0, last_ts) for _ in range(b)])

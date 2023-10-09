@@ -135,9 +135,17 @@ if __name__ == "__main__":
                 # encode masked image and concat downsampled mask
                 #MJ: The masked_image is put to the cond_stage_model?
                 #It is because of     cond_stage_config: __is_first_stage__ in config
-                c2 = model.cond_stage_model.encode(batch["masked_image"]) #MJ: encode into the 1/4 space
-                
-               
+                encoder_posterior = model.cond_stage_model.encode(batch["masked_image"]) 
+                #MJ: encode into the 1/4 space
+                #=> self.first_stage_model.encode(x): class VQModelInterface(VQModel): cond_stage_model = first_stage_model
+                #c2: [1,3,128,128]
+                # def encode(self, x):
+                #     h = self.encoder(x) #MJ: self.encoder = Encoder(**ddconfig); => self.encoder.forward(x)
+                #     #MJ: 
+                #     h = self.quant_conv(h)
+                #     return h
+                c2 = model.get_first_stage_encoding(encoder_posterior) 
+                #: => c2 = encoder_posterior / std(z) = encoder_posterior * vae_scale_factor      
                 
                 #c_cat = torch.cat((c1, c2), dim=1) #MJ: c= the stack of the masked_image and the mask
                 c_cat = torch.cat((c2, c1), dim=1) #MJ: c= the stack of the masked_image and the mask
@@ -150,8 +158,8 @@ if __name__ == "__main__":
                     
                     batch_size=c_cat.shape[0],
                     shape=shape,
-                    mask = None,
-                    #mask=latent_mask,   #MJ: latent_mask in [0,1]
+                    #mask = None,
+                    mask=latent_mask,   #MJ: latent_mask in [0,1]
                                     
                     init_image = init_image,  #MJ: in [-1,1]                  
                                    

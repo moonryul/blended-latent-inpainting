@@ -392,7 +392,7 @@ class Encoder(nn.Module): #MJ: Encoder becomes the encoder of VAE
         z_channels,
         double_z=True,
         use_linear_attn=False,
-        attn_type="vanilla",
+        attn_type="vanilla", #MJ: attn_type ='none' in inpaint_moon2.py
         **ignore_kwargs,
     ):
         super().__init__()
@@ -432,10 +432,10 @@ class Encoder(nn.Module): #MJ: Encoder becomes the encoder of VAE
                 if curr_res in attn_resolutions:
                     attn.append(make_attn(block_in, attn_type=attn_type))
             down = nn.Module()
-            down.block = block
-            down.attn = attn
+            down.block = block #MJ: Resnet Blocks
+            down.attn = attn   #MJ: attn block
             if i_level != self.num_resolutions - 1:
-                down.downsample = Downsample(block_in, resamp_with_conv)
+                down.downsample = Downsample(block_in, resamp_with_conv) #MJ: downsample block
                 curr_res = curr_res // 2
             self.down.append(down)
 
