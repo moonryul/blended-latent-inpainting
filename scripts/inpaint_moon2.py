@@ -170,11 +170,27 @@ if __name__ == "__main__":
                 ) #MJ: predicted_image is the generated image for the mask region
 
                 #MJ: compute the average of the original image, image.
-                mean_of_org_img  = image.mean([2,3], keepdim=True)
-                mean_of_predicted_image = predicted_image.mean([2,3], keepdim=True)
-                deviations_of_predicted_image = predicted_image - mean_of_predicted_image
-                # Use mean_of_org_img to shift the mean color of the predicted image to the original image
-                predicted_image = mean_of_org_img + deviations_of_predicted_image
+                # [2,3] refers to (H,W) dim of of the image tensor (B,C,H,W)
+                mean_org  = image.mean([2,3], keepdim=True)
+                mean_pred = predicted_image.mean([2,3], keepdim=True)
+                #deviations_predicted = predicted_image - mean_pred
+                # # Use mean_of_org_img to shift the mean color of the predicted image to the original image
+                #predicted_image = mean_org + deviations_predicted
+                
+                std_org = image.std([2,3], keepdim=True)
+                std_pred = predicted_image.std([2,3], keepdim=True)
+                
+                normalized_predicted = predicted_image - mean_pred
+                
+                #MJ: scale the stds of both images:
+                # If the standard deviation of the predicted image (std_pred) is higher than that of the original image 
+                #  (std_org), this operation will reduce the spread of pixel values in the predicted_image, and vice versa.
+                predicted_image =   normalized_predicted * (std_org / std_pred) + mean_org
+                #
+                 
+                predicted_image = torch.clamp(
+                       predicted_image, min=0.0, max=1.0
+                ) 
                  
                 inpainted = (1 - mask) * image + mask * predicted_image
                 inpainted = inpainted.cpu().numpy().transpose(0, 2, 3, 1)[0] * 255
